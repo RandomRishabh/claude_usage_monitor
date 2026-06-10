@@ -54,6 +54,11 @@ function scrapeUsagePage() {
   }
 }
 
+// Keepalive ping — wakes the service worker every 20s so alarms aren't the only trigger
+setInterval(() => {
+  try { chrome.runtime.sendMessage({ type: "ping" }); } catch (_) {}
+}, 20000);
+
 // Scrape every 20 seconds and once on load
 setInterval(scrapeUsagePage, 20000);
 setTimeout(scrapeUsagePage, 2000);

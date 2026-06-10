@@ -19,31 +19,53 @@ $script:usage = @{
     lastUpdated  = $null
 }
 
-# ── Icon generator (draws a number inside a colored circle) ──────────
+# ── Icon generator (donut ring progress indicator) ───────────────────
 function New-TrayIcon([int]$pct, [string]$level) {
-    $bmp = New-Object System.Drawing.Bitmap(16, 16)
+    $bmp = New-Object System.Drawing.Bitmap(64, 64)
     $g   = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode     = 'AntiAlias'
-    $g.TextRenderingHint = 'ClearTypeGridFit'
+    $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 
-    $color = switch ($level) {
+    $ringColor = switch ($level) {
         'red'    { [System.Drawing.Color]::FromArgb(231, 76, 60)  }
         'yellow' { [System.Drawing.Color]::FromArgb(243, 156, 18) }
         default  { [System.Drawing.Color]::FromArgb(39, 174, 96)  }
     }
 
-    $g.FillEllipse((New-Object System.Drawing.SolidBrush($color)), 0, 0, 15, 15)
+    # Ring bounds: center (32,32), radius 26 → rect (6, 6, 52, 52)
+    $rx = 6; $ry = 6; $rw = 52; $rh = 52
 
-    $text = if ($pct -ge 100) { "!" } else { "$pct" }
-    $fontSize = if ($text.Length -ge 2) { 6.5 } else { 7.5 }
-    $font = New-Object System.Drawing.Font("Segoe UI", $fontSize, [System.Drawing.FontStyle]::Bold)
-    $sz   = $g.MeasureString($text, $font)
-    $x    = [Math]::Max(0, (16 - $sz.Width)  / 2)
-    $y    = [Math]::Max(0, (16 - $sz.Height) / 2)
+    # Background ring (full 360°, dark gray, 30% opacity)
+    $bgPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(77, 42, 42, 42), 10)
+    $bgPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    $g.DrawArc($bgPen, $rx, $ry, $rw, $rh, 0, 360)
+
+    # Progress ring (clockwise from top, -90°)
+    $sweep = [Math]::Round($pct / 100.0 * 360, 1)
+    if ($sweep -gt 0) {
+        $fgPen = New-Object System.Drawing.Pen($ringColor, 10)
+        $fgPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $fgPen.EndCap   = [System.Drawing.Drawing2D.LineCap]::Round
+        $g.DrawArc($fgPen, $rx, $ry, $rw, $rh, -90, $sweep)
+        $fgPen.Dispose()
+    }
+
+    # Center number
+    $text     = if ($pct -ge 100) { "!" } else { "$pct" }
+    $fontSize = if ($text.Length -ge 2) { 26.0 } else { 30.0 }
+    $font     = New-Object System.Drawing.Font("Segoe UI", $fontSize, [System.Drawing.FontStyle]::Bold)
+    $sz       = $g.MeasureString($text, $font)
+    $x        = [Math]::Max(0, (64 - $sz.Width)  / 2)
+    $y        = [Math]::Max(0, (64 - $sz.Height) / 2)
     $g.DrawString($text, $font, [System.Drawing.Brushes]::White, $x, $y)
 
-    $font.Dispose(); $g.Dispose()
-    return [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    $font.Dispose(); $bgPen.Dispose(); $g.Dispose()
+
+    # Downscale to 32x32 via high-quality bicubic for smooth anti-aliased edges
+    $resized = New-Object System.Drawing.Bitmap($bmp, 32, 32)
+    $bmp.Dispose()
+    return [System.Drawing.Icon]::FromHandle($resized.GetHicon())
 }
 
 function Get-Level([int]$pct) {

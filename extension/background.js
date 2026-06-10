@@ -30,35 +30,38 @@ async function sendToWidget(usage) {
   }
 }
 
-// ── Flexible JSON walker ─────────────────────────────────────────────
-function normalizeApiPayload(obj, depth = 0) {
-  if (depth > 6 || !obj || typeof obj !== "object") return {};
+// ── ISO timestamp → "Xh Ym" countdown from now ──────────────────────
+function isoToCountdown(iso) {
+  if (!iso) return null;
+  const diffMs = new Date(iso) - Date.now();
+  if (diffMs <= 0) return "now";
+  const totalMin = Math.floor(diffMs / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
-  let result = {};
+// ── ISO timestamp → "Sun 11:30 AM" ──────────────────────────────────
+function isoToShortDate(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
-  for (const [key, val] of Object.entries(obj)) {
-    const k = key.toLowerCase();
-
-    if (typeof val === "number" && val >= 0 && val <= 100) {
-      if (k.includes("session") || k.includes("current")) result.session = val;
-      else if (k.includes("week")) result.weekly = val;
-      else if (k.includes("percent") || k.includes("usage")) {
-        if (result.session === undefined) result.session = val;
-      }
-    }
-
-    if (typeof val === "string" && k.includes("reset") && /\d/.test(val)) {
-      if (k.includes("session") || k.includes("current"))
-        result.sessionReset = val;
-      else result.weeklyReset = val;
-    }
-
-    if (typeof val === "object" && val !== null) {
-      const nested = normalizeApiPayload(val, depth + 1);
-      result = { ...result, ...nested };
-    }
-  }
-
+// ── Parse known API response structure ──────────────────────────────
+function parseUsageResponse(data) {
+  if (!data || typeof data !== "object") return {};
+  const fh = data.five_hour ?? {};
+  const sd = data.seven_day ?? {};
+  const result = {};
+  if (fh.utilization != null) result.session = Math.round(fh.utilization);
+  if (sd.utilization != null) result.weekly = Math.round(sd.utilization);
+  result.sessionReset = isoToCountdown(fh.resets_at ?? null);
+  result.weeklyReset = isoToShortDate(sd.resets_at ?? null);
   return result;
 }
 
@@ -75,13 +78,13 @@ async function getOrgId() {
 
   let orgId = null;
   if (Array.isArray(orgs) && orgs.length > 0) {
-    orgId = orgs[0].id ?? orgs[0].uuid ?? orgs[0].organization_id ?? null;
+    orgId = orgs[0].uuid ?? orgs[0].organization_id ?? null;
   } else if (orgs && typeof orgs === "object") {
-    orgId = orgs.id ?? orgs.uuid ?? orgs.organization_id ?? null;
+    orgId = orgs.uuid ?? orgs.organization_id ?? null;
     // Handle wrapped shapes: { organizations: [...] }, { data: [...] }, etc.
     const arr = orgs.organizations ?? orgs.data ?? orgs.results;
     if (orgId === null && Array.isArray(arr) && arr.length > 0) {
-      orgId = arr[0].id ?? arr[0].uuid ?? arr[0].organization_id ?? null;
+      orgId = arr[0].uuid ?? arr[0].organization_id ?? null;
     }
   }
 
@@ -111,7 +114,7 @@ async function pollUsage() {
     if (!resp.ok) return;
 
     const json = await resp.json();
-    const usage = normalizeApiPayload(json);
+    const usage = parseUsageResponse(json);
 
     if (usage.session !== undefined || usage.weekly !== undefined) {
       usage.lastUpdated = Date.now();
@@ -137,18 +140,24 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.remove("orgId"); // clear any stale/numeric cached id
   chrome.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
   pollUsage();
 });
 
 // ── Message listener (content.js / inject.js passthrough) ───────────
 chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
+  if (msg.type === "ping") {
+    pollUsage();
+    return;
+  }
+
   let usage = null;
 
   if (msg.type === "usage_from_dom") {
     usage = msg.data;
   } else if (msg.type === "usage_from_fetch") {
-    usage = normalizeApiPayload(msg.payload);
+    usage = parseUsageResponse(msg.payload);
   }
 
   if (usage && (usage.session !== undefined || usage.weekly !== undefined)) {

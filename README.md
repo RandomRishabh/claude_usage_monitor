@@ -4,8 +4,8 @@
 
 Two pieces that work together:
 
-1. **Chrome Extension** — silently captures your usage data from claude.ai
-2. **PowerShell Widget** — shows a color-coded icon in your Windows taskbar tray (near the clock)
+1. **Chrome Extension** — polls the claude.ai usage API every 30 seconds automatically
+2. **PowerShell Widget** — shows a color-coded donut ring icon in your Windows taskbar tray (near the clock)
 
 No admin password required for either.
 
@@ -49,36 +49,36 @@ No admin password required for either.
 
 ## STEP 3 — Start the Taskbar Widget
 
-1. Double-click **`Start-Claude-Widget.bat`**
-2. A green circle icon with "0" should appear in your system tray
-   (bottom-right, near the clock/volume icons)
-3. If you don't see it, click the **^** arrow to expand hidden tray icons
+On **restricted work laptops where `powershell.exe` is blocked**, you must launch via VS Code terminal:
 
-> The script opens a tiny HTTP server on localhost:9876 — no firewall
-> issues, no admin needed. It stays running in the background.
+1. Open **VS Code**, then open its integrated terminal (`` Ctrl+` ``)
+2. Run these two commands:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   . "D:\study\projects\claude-usage-monitor\claude-usage-widget.ps1"
+   ```
+3. A donut ring icon should appear in your system tray (bottom-right, near the clock)
+4. If you don't see it, click the **^** arrow to expand hidden tray icons
+
+> **`Start-Claude-Widget.bat`** is included but will not work on machines where
+> `powershell.exe` is blocked by policy. Use the VS Code terminal method above.
 
 ---
 
-## STEP 4 — Feed It Data
+## STEP 4 — How Polling Works
 
-1. Go to **claude.ai** in your browser
-2. Open **Settings → Usage** (the page from your screenshot)
-3. The extension will scrape the usage percentages and send them
-   to the taskbar widget
-4. You should see the tray icon update to show your session percentage
-   with a green/yellow/red color
+1. Make sure **at least one claude.ai tab is open** in Chrome (any page — you don't need Settings > Usage)
+2. The extension polls the usage API automatically every **30 seconds** via `chrome.alarms`
+3. The content script sends a keepalive ping every **20 seconds** so the service worker stays awake
+4. The tray icon updates within ~30 seconds of opening Chrome
 
-The extension also tries to intercept Claude's internal API calls, so
-after the initial reading, it may update automatically even without
-the Usage page open.
+That's it — no manual page navigation needed.
 
 ---
 
 ## STEP 5 — Auto-Start on Login (Optional)
 
-1. Press `Win + R`, type `shell:startup`, press Enter
-2. Copy the **`Start-Claude-Widget.bat`** file into that folder
-3. The widget will now launch automatically every time you log in
+Since the `.bat` launcher may not work on restricted machines, create a VS Code workspace task or a shortcut that opens your `.ps1` in a terminal on login. The simplest approach is to pin VS Code to startup and keep a terminal profile that runs the widget command.
 
 ---
 
@@ -86,9 +86,9 @@ the Usage page open.
 
 | What you see                 | What it means                          |
 |------------------------------|----------------------------------------|
-| Green icon with "9"          | Session is at 9% — you're fine         |
-| Yellow icon with "62"        | Session at 62% — moderate use          |
-| Red icon with "91"           | Session at 91% — nearing limit!        |
+| Green donut with "9"         | Session is at 9% — you're fine         |
+| Yellow donut with "62"       | Session at 62% — moderate use          |
+| Red donut with "91"          | Session at 91% — nearing limit!        |
 | Hover over icon              | Tooltip shows session + weekly + reset |
 | Left-click icon              | Popup with full details                |
 | Right-click → Open Usage     | Opens claude.ai/settings/usage         |
@@ -96,28 +96,29 @@ the Usage page open.
 | Balloon notification at 75%  | Heads up warning                       |
 | Balloon notification at 90%  | Critical warning                       |
 
+The tray icon is a **donut ring** that fills clockwise from 12 o'clock. The arc color is green (≤50%), yellow (51–80%), or red (>80%). Drawn at 64×64 and downscaled to 32×32 for crisp anti-aliased rendering.
+
 ---
 
 ## Troubleshooting
 
 **Widget icon doesn't appear:**
-- Make sure PowerShell is actually running (check Task Manager for `powershell`)
-- Try running the .ps1 directly: right-click → "Run with PowerShell"
+- Confirm the PS1 script is running in your VS Code terminal (no red errors)
+- `powershell.exe` launched directly (e.g. double-clicking the .bat) is blocked on restricted machines — use the VS Code terminal method
 
-**Data not updating:**
-- Go to claude.ai → Settings → Usage to trigger a fresh scrape
-- Check the extension popup (click the extension icon) — if it says
-  "No data yet," the DOM scraper hasn't found the usage text yet
-- Reload the claude.ai tab
+**Data not updating / badge shows "…":**
+- Make sure at least one claude.ai tab is open — the content script keepalive requires an active tab
+- Click the extension icon to open the popup and check the last-updated timestamp
+- Reload the claude.ai tab, then wait up to 30 seconds
 
-**"Execution Policy" error:**
-- The .bat file already uses `-ExecutionPolicy Bypass`
-- If it still fails, open PowerShell and run:
-  `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
+**"?" badge on the extension icon:**
+- Your claude.ai session has expired — log back in and the extension will rediscover your org automatically
+
+**"Execution Policy" error in VS Code terminal:**
+- Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first (Process scope, not CurrentUser — avoids policy conflicts)
 
 **Extension disappeared after Chrome update:**
-- Sideloaded extensions sometimes get disabled. Just go to
-  chrome://extensions, find it, and toggle it back on.
+- Sideloaded extensions sometimes get disabled. Go to chrome://extensions and toggle it back on.
 
 ---
 
@@ -127,4 +128,4 @@ Correct:
 - Chrome Developer Mode is a user-level toggle (no admin)
 - PowerShell and System.Windows.Forms are built into Windows
 - localhost HTTP listener doesn't need elevated privileges
-- `shell:startup` is a per-user folder (no admin)
+- VS Code terminal inherits your user session — no elevation needed
