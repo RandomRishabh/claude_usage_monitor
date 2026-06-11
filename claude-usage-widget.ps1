@@ -74,7 +74,7 @@ $script:dwDragForm     = $null
 
 # ── Icon generator (donut ring progress indicator) ───────────────────
 function New-TrayIcon([int]$pct, [string]$level) {
-    # Draw on a 128px canvas, downscale to 32 → crisp on high-DPI screens.
+    # Draw on a 128px canvas, downscale to the system tray icon size → crisp.
     $canvas = 128
     $bmp = New-Object System.Drawing.Bitmap($canvas, $canvas)
     $g   = [System.Drawing.Graphics]::FromImage($bmp)
@@ -88,8 +88,9 @@ function New-TrayIcon([int]$pct, [string]$level) {
         default  { [System.Drawing.Color]::FromArgb(39, 174, 96)  }
     }
 
-    # Ring: center (64,64), path radius 52, pen width 20 → rect (12,12,104,104)
-    $penW  = 20
+    # Ring: center (64,64), path radius 52, pen width 8 → rect (12,12,104,104)
+    # Thin ring leaves more interior space for the number.
+    $penW  = 8
     $ringR = 52
     $rx = 12; $ry = 12; $rw = 104; $rh = 104
 
@@ -130,8 +131,9 @@ function New-TrayIcon([int]$pct, [string]$level) {
 
     $font.Dispose(); $bgPen.Dispose(); $g.Dispose()
 
-    # Downscale to 32x32 via high-quality bicubic for smooth anti-aliased edges
-    $resized = New-Object System.Drawing.Bitmap($bmp, 32, 32)
+    # Downscale to the actual tray icon size (DPI-correct) via bicubic
+    $iconSize = [System.Windows.Forms.SystemInformation]::SmallIconSize
+    $resized  = New-Object System.Drawing.Bitmap($bmp, $iconSize)
     $bmp.Dispose()
     return [System.Drawing.Icon]::FromHandle($resized.GetHicon())
 }
