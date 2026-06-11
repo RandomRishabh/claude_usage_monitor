@@ -64,6 +64,104 @@
   .reset { color: #5B9BD5; }
   .pct   { font-weight: 600; color: #e5e5e5; }
 
+  .forecast {
+    font-size: 11px;
+    margin-top: 7px;
+    line-height: 1.4;
+  }
+  .forecast.warn  { color: #F39C12; }
+  .forecast.muted { color: #6b7280; }
+
+  .divider {
+    border-top: 1px solid #1f1f2e;
+    margin: 4px 0 14px;
+  }
+
+  .btn {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #2f6f4f;
+    border-radius: 6px;
+    background: #173a2a;
+    color: #6ee7a8;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s ease;
+  }
+  .btn:hover { background: #1d4a35; }
+  .hint {
+    font-size: 10px;
+    color: #6b7280;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .time-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .time-row input[type="time"] {
+    flex: 1;
+    background: #1f1f2e;
+    border: 1px solid #2a2a3a;
+    border-radius: 4px;
+    color: #e5e5e5;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 5px 7px;
+  }
+  .time-row .dash { color: #6b7280; }
+
+  .plan-text {
+    font-size: 11px;
+    color: #c9c9d4;
+    line-height: 1.5;
+    margin: 12px 0 10px;
+  }
+  .plan-text b { color: #6ee7a8; font-weight: 600; }
+
+  .timeline { margin-top: 4px; }
+  .tl-row {
+    position: relative;
+    height: 14px;
+    background: #16161f;
+    border-radius: 3px;
+    margin-bottom: 4px;
+  }
+  .tl-rowlabel {
+    font-size: 9px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: #6b7280;
+    margin-bottom: 3px;
+  }
+  .tl-work {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(91, 155, 213, 0.28);
+    border: 1px solid rgba(91, 155, 213, 0.55);
+    border-radius: 3px;
+  }
+  .tl-win {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-radius: 3px;
+    opacity: 0.85;
+  }
+  .tl-win.w1 { background: #27AE60; }
+  .tl-win.w2 { background: #5B9BD5; }
+  .tl-win.w3 { background: #8E7CC3; }
+  .tl-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #555;
+    margin-top: 2px;
+  }
+
   .empty {
     text-align: center;
     color: #555;
@@ -97,7 +195,27 @@
       Open <b>Settings → Usage</b> on claude.ai<br/>to capture the initial reading.
     </div>
   </div>
+
+  <div class="divider"></div>
+
+  <button id="primerBtn" class="btn">＋ Start window now</button>
+  <div class="hint">
+    Opens a new chat with a throwaway prompt ready — <b>you</b> press Enter to send it.
+  </div>
+
+  <div class="section" style="margin-top:16px;">
+    <div class="label">Work hours</div>
+    <div class="time-row">
+      <input type="time" id="workStart" />
+      <span class="dash">–</span>
+      <input type="time" id="workEnd" />
+    </div>
+  </div>
+
+  <div id="planner"></div>
+
   <div class="footer" id="footer"></div>
+  <script src="planner.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

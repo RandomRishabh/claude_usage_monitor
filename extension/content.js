@@ -71,3 +71,70 @@ new MutationObserver(() => {
     setTimeout(scrapeUsagePage, 1500);
   }
 }).observe(document.body, { childList: true, subtree: true });
+
+// ── 4. Session "primer" — pre-fill a throwaway prompt, NEVER auto-send ─
+// The popup opens claude.ai/new and sets a `primerPending` flag. We type the
+// prompt into the compose box and leave the cursor there for the user.
+const PRIMER_TEXT = "Just starting my session — say ok";
+
+function findComposer() {
+  return (
+    document.querySelector('div.ProseMirror[contenteditable="true"]') ||
+    document.querySelector('[contenteditable="true"]') ||
+    document.querySelector('textarea')
+  );
+}
+
+function fillComposer(el, text) {
+  el.focus();
+
+  if (el.tagName === "TEXTAREA") {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype, "value"
+    ).set;
+    setter.call(el, text);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+
+  // contenteditable (ProseMirror): place the caret, then insert via execCommand
+  // so the editor's own input handlers fire. We never dispatch Enter / submit.
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel.addRange(range);
+
+  const ok = document.execCommand("insertText", false, text);
+  if (!ok) {
+    el.textContent = text;
+    el.dispatchEvent(
+      new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" })
+    );
+  }
+}
+
+function tryPrimer(attempt = 0) {
+  const el = findComposer();
+  if (el) {
+    try { fillComposer(el, PRIMER_TEXT); } catch (_) {}
+    return; // success or graceful no-op — done either way
+  }
+  if (attempt < 20) {
+    setTimeout(() => tryPrimer(attempt + 1), 300); // wait up to ~6s for the editor
+  }
+  // else: DOM never produced a composer — leave the tab open, do nothing
+}
+
+async function maybeRunPrimer() {
+  if (!location.pathname.startsWith("/new")) return;
+  const { primerPending } = await chrome.storage.local.get("primerPending");
+  if (!primerPending) return;
+  // Consume the flag immediately so only this fresh tab primes, once.
+  chrome.storage.local.remove("primerPending");
+  if (Date.now() - primerPending > 15000) return; // stale request — ignore
+  tryPrimer();
+}
+
+maybeRunPrimer();
