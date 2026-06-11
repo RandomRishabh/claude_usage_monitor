@@ -41,7 +41,7 @@ Start-Claude-Widget.bat  - Launcher (does not work on restricted machines — se
 - Auth: browser session cookies (`credentials: "include"`)
 
 ## Tray icon
-Donut ring drawn at 64×64, downscaled to 32×32 via high-quality bicubic for crisp anti-aliased edges. Ring fills clockwise from 12 o'clock. Color: green ≤50%, yellow 51–80%, red >80%.
+Solid colored **badge** (notification-count style) — the fill color IS the status: green ≤50%, yellow 51–80%, red >80%. A bold white percentage number fills most of the badge. Drawn on a 4× supersampled canvas (`SmallIconSize.Width * 4`) and downscaled to the actual `[SystemInformation]::SmallIconSize` (DPI-correct: 16/20/24/32) via bicubic. A ring wastes pixels at ~16–20px, so the tray uses a filled badge for legibility. (The donut-ring design is kept for the detail popup window, where it has room to render well.)
 
 ## Burn-rate forecast
 On every successful poll, `background.js` appends a snapshot to `history` in `chrome.storage.local`:

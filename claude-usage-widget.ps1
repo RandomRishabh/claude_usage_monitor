@@ -72,68 +72,43 @@ $script:dwDragging     = $false
 $script:dwDragCursor   = $null
 $script:dwDragForm     = $null
 
-# ── Icon generator (donut ring progress indicator) ───────────────────
+# ── Icon generator (solid colored badge with a white number) ─────────
+# A ring wastes pixels at ~16-20px; a filled badge maximizes legibility.
 function New-TrayIcon([int]$pct, [string]$level) {
-    # Draw on a 128px canvas, downscale to the system tray icon size → crisp.
-    $canvas = 128
+    $iconSize = [System.Windows.Forms.SystemInformation]::SmallIconSize.Width
+    $canvas   = $iconSize * 4   # 4x supersample for crisp downscale
+
     $bmp = New-Object System.Drawing.Bitmap($canvas, $canvas)
     $g   = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
     $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 
-    $ringColor = switch ($level) {
-        'red'    { [System.Drawing.Color]::FromArgb(231, 76, 60)  }
-        'yellow' { [System.Drawing.Color]::FromArgb(243, 156, 18) }
-        default  { [System.Drawing.Color]::FromArgb(39, 174, 96)  }
+    # Filled rounded-rect background — the color IS the status indicator.
+    $bgColor = Get-LevelColor $level
+    $rad     = 3.0 * ($canvas / $iconSize)   # ~3px corner at final size
+    $bgPath  = New-RoundedPath 0 0 $canvas $canvas $rad
+    $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
+    $g.FillPath($bgBrush, $bgPath)
+    $bgBrush.Dispose(); $bgPath.Dispose()
+
+    # White number, bold, filling as much of the badge as possible.
+    $text = "$pct"
+    $fontSize = switch ($text.Length) {
+        1       { $canvas * 0.70 }
+        2       { $canvas * 0.60 }
+        default { $canvas * 0.45 }
     }
-
-    # Ring: center (64,64), path radius 52, pen width 8 → rect (12,12,104,104)
-    # Thin ring leaves more interior space for the number.
-    $penW  = 8
-    $ringR = 52
-    $rx = 12; $ry = 12; $rw = 104; $rh = 104
-
-    # Background ring (full 360°, dark gray, 30% opacity)
-    $bgPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(77, 42, 42, 42), $penW)
-    $bgPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $g.DrawArc($bgPen, $rx, $ry, $rw, $rh, 0, 360)
-
-    # Progress ring (clockwise from top, -90°)
-    $sweep = [Math]::Round($pct / 100.0 * 360, 1)
-    if ($sweep -gt 0) {
-        $fgPen = New-Object System.Drawing.Pen($ringColor, $penW)
-        $fgPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-        $fgPen.EndCap   = [System.Drawing.Drawing2D.LineCap]::Round
-        $g.DrawArc($fgPen, $rx, $ry, $rw, $rh, -90, $sweep)
-        $fgPen.Dispose()
-    }
-
-    # Center number — must sit INSIDE the donut hole, not over the ring.
-    # Auto-fit: shrink (pixel) font until the text box is contained within a
-    # circle of radius (ringR - penW), i.e. half its diagonal <= safe radius.
-    $text     = if ($pct -ge 100) { "!" } else { "$pct" }
-    $fontSize = if ($text.Length -ge 3) { 34.0 } elseif ($text.Length -eq 2) { 44.0 } else { 52.0 }
-    $safeR    = $ringR - $penW
-    $font     = $null
-    $sz       = $null
-    while ($true) {
-        if ($null -ne $font) { $font.Dispose() }
-        $font = New-Object System.Drawing.Font("Segoe UI", $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-        $sz   = $g.MeasureString($text, $font)
-        $halfDiag = [Math]::Sqrt(($sz.Width * $sz.Width) + ($sz.Height * $sz.Height)) / 2.0
-        if ($halfDiag -le $safeR -or $fontSize -le 12) { break }
-        $fontSize -= 2
-    }
-    $x = ($canvas - $sz.Width)  / 2
-    $y = ($canvas - $sz.Height) / 2
+    $font = New-Object System.Drawing.Font("Segoe UI", [single]$fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $sz   = $g.MeasureString($text, $font)
+    $x    = ($canvas - $sz.Width)  / 2
+    $y    = ($canvas - $sz.Height) / 2
     $g.DrawString($text, $font, [System.Drawing.Brushes]::White, $x, $y)
 
-    $font.Dispose(); $bgPen.Dispose(); $g.Dispose()
+    $font.Dispose(); $g.Dispose()
 
-    # Downscale to the actual tray icon size (DPI-correct) via bicubic
-    $iconSize = [System.Windows.Forms.SystemInformation]::SmallIconSize
-    $resized  = New-Object System.Drawing.Bitmap($bmp, $iconSize)
+    # Downscale to the actual tray icon size via high-quality bicubic.
+    $resized = New-Object System.Drawing.Bitmap($bmp, [System.Windows.Forms.SystemInformation]::SmallIconSize)
     $bmp.Dispose()
     return [System.Drawing.Icon]::FromHandle($resized.GetHicon())
 }
