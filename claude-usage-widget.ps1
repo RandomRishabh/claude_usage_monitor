@@ -34,6 +34,17 @@ try {
     [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 } catch {}
 
+# ── DPI scale factor (read AFTER DPI awareness is set above) ─────────
+# The detail window is laid out at a 96-DPI baseline and scaled manually
+# by this factor, so it never clips/overlaps at 125%/150% display scaling.
+$script:dwScale = 1.0
+try {
+    $screenG = [System.Drawing.Graphics]::FromHwnd([System.IntPtr]::Zero)
+    $script:dwScale = $screenG.DpiX / 96.0
+    $screenG.Dispose()
+} catch {}
+if ($script:dwScale -le 0) { $script:dwScale = 1.0 }
+
 # ── Global state ─────────────────────────────────────────────────────
 $script:usage = @{
     session              = $null
@@ -63,7 +74,9 @@ $script:dwDragForm     = $null
 
 # ── Icon generator (donut ring progress indicator) ───────────────────
 function New-TrayIcon([int]$pct, [string]$level) {
-    $bmp = New-Object System.Drawing.Bitmap(64, 64)
+    # Draw on a 128px canvas, downscale to 32 → crisp on high-DPI screens.
+    $canvas = 128
+    $bmp = New-Object System.Drawing.Bitmap($canvas, $canvas)
     $g   = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
@@ -75,31 +88,44 @@ function New-TrayIcon([int]$pct, [string]$level) {
         default  { [System.Drawing.Color]::FromArgb(39, 174, 96)  }
     }
 
-    # Ring bounds: center (32,32), radius 26 → rect (6, 6, 52, 52)
-    $rx = 6; $ry = 6; $rw = 52; $rh = 52
+    # Ring: center (64,64), path radius 52, pen width 20 → rect (12,12,104,104)
+    $penW  = 20
+    $ringR = 52
+    $rx = 12; $ry = 12; $rw = 104; $rh = 104
 
     # Background ring (full 360°, dark gray, 30% opacity)
-    $bgPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(77, 42, 42, 42), 10)
+    $bgPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(77, 42, 42, 42), $penW)
     $bgPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $g.DrawArc($bgPen, $rx, $ry, $rw, $rh, 0, 360)
 
     # Progress ring (clockwise from top, -90°)
     $sweep = [Math]::Round($pct / 100.0 * 360, 1)
     if ($sweep -gt 0) {
-        $fgPen = New-Object System.Drawing.Pen($ringColor, 10)
+        $fgPen = New-Object System.Drawing.Pen($ringColor, $penW)
         $fgPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
         $fgPen.EndCap   = [System.Drawing.Drawing2D.LineCap]::Round
         $g.DrawArc($fgPen, $rx, $ry, $rw, $rh, -90, $sweep)
         $fgPen.Dispose()
     }
 
-    # Center number
+    # Center number — must sit INSIDE the donut hole, not over the ring.
+    # Auto-fit: shrink (pixel) font until the text box is contained within a
+    # circle of radius (ringR - penW), i.e. half its diagonal <= safe radius.
     $text     = if ($pct -ge 100) { "!" } else { "$pct" }
-    $fontSize = if ($text.Length -ge 2) { 26.0 } else { 30.0 }
-    $font     = New-Object System.Drawing.Font("Segoe UI", $fontSize, [System.Drawing.FontStyle]::Bold)
-    $sz       = $g.MeasureString($text, $font)
-    $x        = [Math]::Max(0, (64 - $sz.Width)  / 2)
-    $y        = [Math]::Max(0, (64 - $sz.Height) / 2)
+    $fontSize = if ($text.Length -ge 3) { 34.0 } elseif ($text.Length -eq 2) { 44.0 } else { 52.0 }
+    $safeR    = $ringR - $penW
+    $font     = $null
+    $sz       = $null
+    while ($true) {
+        if ($null -ne $font) { $font.Dispose() }
+        $font = New-Object System.Drawing.Font("Segoe UI", $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+        $sz   = $g.MeasureString($text, $font)
+        $halfDiag = [Math]::Sqrt(($sz.Width * $sz.Width) + ($sz.Height * $sz.Height)) / 2.0
+        if ($halfDiag -le $safeR -or $fontSize -le 12) { break }
+        $fontSize -= 2
+    }
+    $x = ($canvas - $sz.Width)  / 2
+    $y = ($canvas - $sz.Height) / 2
     $g.DrawString($text, $font, [System.Drawing.Brushes]::White, $x, $y)
 
     $font.Dispose(); $bgPen.Dispose(); $g.Dispose()
@@ -178,12 +204,21 @@ $script:DotPaint = {
     $b.Dispose()
 }
 
+# Scale a 96-DPI coordinate/size to the active DPI.
+function S([double]$v) { return [int][Math]::Round($v * $script:dwScale) }
+
+# Build a Bold/Regular pixel-unit font at the 96-DPI point size, DPI-scaled.
+function New-PxFont([string]$name, [double]$pt, [System.Drawing.FontStyle]$style) {
+    $px = $pt * (96.0 / 72.0) * $script:dwScale
+    return New-Object System.Drawing.Font($name, [single]$px, $style, [System.Drawing.GraphicsUnit]::Pixel)
+}
+
 function New-Lbl($text, $x, $y, $w, $h, $font, $color, $align) {
     $l = New-Object System.Windows.Forms.Label
     $l.AutoSize  = $false
     $l.Text      = $text
-    $l.Location  = New-Object System.Drawing.Point($x, $y)
-    $l.Size      = New-Object System.Drawing.Size($w, $h)
+    $l.Location  = New-Object System.Drawing.Point((S $x), (S $y))
+    $l.Size      = New-Object System.Drawing.Size((S $w), (S $h))
     $l.Font      = $font
     $l.ForeColor = $color
     $l.BackColor = [System.Drawing.Color]::Transparent
@@ -216,13 +251,12 @@ function Add-DragHandlers($ctrl) {
 # Builds the window once; reused (show/hide) for the app's lifetime.
 function Initialize-DetailWindow {
     $f = New-Object System.Windows.Forms.Form
-    # DPI auto-scaling: hardcoded coords below are authored at 96 DPI; WinForms
-    # scales controls/fonts to the active DPI from this 96-DPI baseline.
-    $f.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
-    $f.AutoScaleMode       = [System.Windows.Forms.AutoScaleMode]::Dpi
+    # We scale every coord/size/font manually by $script:dwScale, so disable
+    # WinForms auto-scaling to avoid double-scaling.
+    $f.AutoScaleMode   = [System.Windows.Forms.AutoScaleMode]::None
     $f.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-    $f.Width           = 320
-    $f.Height          = 256
+    $f.Width           = S 320
+    $f.Height          = S 286   # +30 base for breathing room (forecast/primer)
     $f.BackColor       = $cBg
     $f.ShowInTaskbar   = $false
     $f.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
@@ -233,9 +267,8 @@ function Initialize-DetailWindow {
         param($s, $e)
         $e.Graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
         $e.Graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
-        $scale = try { $s.DeviceDpi / 96.0 } catch { 1.0 }
-        $pad   = [int](18 * $scale)
-        $lineY = [int](47 * $scale)
+        $pad   = S 18
+        $lineY = S 47
         $pen = New-Object System.Drawing.Pen($cLine, 1)
         $e.Graphics.DrawRectangle($pen, 0, 0, ($s.Width - 1), ($s.Height - 1))
         $e.Graphics.DrawLine($pen, $pad, $lineY, ($s.Width - $pad), $lineY)
@@ -247,21 +280,23 @@ function Initialize-DetailWindow {
         $script:detailHiddenAt = [DateTime]::Now
     })
 
-    # Fonts (created once, reused)
-    $fHeader = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
-    $fLabel  = New-Object System.Drawing.Font("Segoe UI", 8)
-    $fReset  = New-Object System.Drawing.Font("Segoe UI", 9)
-    $fPct    = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $fFore   = New-Object System.Drawing.Font("Segoe UI", 9)
-    $fSmall  = New-Object System.Drawing.Font("Segoe UI", 8)
+    # Fonts (created once, reused) — pixel-unit, DPI-scaled
+    $reg     = [System.Drawing.FontStyle]::Regular
+    $bold    = [System.Drawing.FontStyle]::Bold
+    $fHeader = New-PxFont "Segoe UI Semibold" 12 $reg
+    $fLabel  = New-PxFont "Segoe UI" 8  $reg
+    $fReset  = New-PxFont "Segoe UI" 9  $reg
+    $fPct    = New-PxFont "Segoe UI" 10 $bold
+    $fFore   = New-PxFont "Segoe UI" 9  $reg
+    $fSmall  = New-PxFont "Segoe UI" 8  $reg
 
     $alignL = [System.Drawing.ContentAlignment]::MiddleLeft
     $alignR = [System.Drawing.ContentAlignment]::MiddleRight
 
     # Header: status dot + title
     $dot = New-Object System.Windows.Forms.Panel
-    $dot.Location  = New-Object System.Drawing.Point(18, 20)
-    $dot.Size      = New-Object System.Drawing.Size(11, 11)
+    $dot.Location  = New-Object System.Drawing.Point((S 18), (S 20))
+    $dot.Size      = New-Object System.Drawing.Size((S 11), (S 11))
     $dot.BackColor = $cBg
     $dot.Tag       = 'green'
     $dot.Add_Paint($script:DotPaint)
@@ -275,8 +310,8 @@ function Initialize-DetailWindow {
     $f.Controls.Add((New-Lbl "CURRENT SESSION" 18 58 284 14 $fLabel $cMuted $alignL))
 
     $sBar = New-Object System.Windows.Forms.Panel
-    $sBar.Location  = New-Object System.Drawing.Point(18, 76)
-    $sBar.Size      = New-Object System.Drawing.Size(284, 8)
+    $sBar.Location  = New-Object System.Drawing.Point((S 18), (S 76))
+    $sBar.Size      = New-Object System.Drawing.Size((S 284), (S 8))
     $sBar.BackColor = $cBg
     $sBar.Tag       = 0
     $sBar.Add_Paint($script:BarPaint)
@@ -292,8 +327,8 @@ function Initialize-DetailWindow {
     $f.Controls.Add((New-Lbl "WEEKLY LIMIT" 18 116 284 14 $fLabel $cMuted $alignL))
 
     $wBar = New-Object System.Windows.Forms.Panel
-    $wBar.Location  = New-Object System.Drawing.Point(18, 134)
-    $wBar.Size      = New-Object System.Drawing.Size(284, 8)
+    $wBar.Location  = New-Object System.Drawing.Point((S 18), (S 134))
+    $wBar.Size      = New-Object System.Drawing.Size((S 284), (S 8))
     $wBar.BackColor = $cBg
     $wBar.Tag       = 0
     $wBar.Add_Paint($script:BarPaint)
